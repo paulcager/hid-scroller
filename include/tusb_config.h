@@ -14,9 +14,17 @@ extern "C" {
 // COMMON CONFIGURATION
 //--------------------------------------------------------------------
 
+// MCU type - auto-detected by SDK for RP2040/RP2350
+#ifndef CFG_TUSB_MCU
 #define CFG_TUSB_MCU                OPT_MCU_RP2040
+#endif
+
 #define CFG_TUSB_RHPORT0_MODE       OPT_MODE_DEVICE
+
+// OS type - only define if not already set by build system
+#ifndef CFG_TUSB_OS
 #define CFG_TUSB_OS                 OPT_OS_NONE
+#endif
 
 // Enable device stack
 #define CFG_TUD_ENABLED             1

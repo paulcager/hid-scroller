@@ -11,18 +11,28 @@
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#include "hardware/timer.h"
 #include "tusb.h"
 #include "hid_keycodes.h"
 
 //--------------------------------------------------------------------
 // CONFIGURATION - Edit these to customize behavior
+// (or override at build time with cmake -DINTERVAL_MIN_MS=3000 ...)
 //--------------------------------------------------------------------
 
-// How often to send a keypress (milliseconds)
-#define INTERVAL_MS 1000
+// Random interval range for keypresses (milliseconds)
+#ifndef INTERVAL_MIN_MS
+#define INTERVAL_MIN_MS 5000  // 5 seconds
+#endif
+
+#ifndef INTERVAL_MAX_MS
+#define INTERVAL_MAX_MS 7000  // 7 seconds
+#endif
 
 // Which key to send (see hid_keycodes.h for options)
+#ifndef KEY_TO_SEND
 #define KEY_TO_SEND HID_KEY_PAGEUP
+#endif
 
 // How long to hold key down before releasing (milliseconds)
 #define KEY_HOLD_MS 50
@@ -40,16 +50,7 @@ typedef enum {
 static state_t current_state = STATE_IDLE;
 static absolute_time_t next_action_time;
 static uint32_t keys_sent = 0;
-
-//--------------------------------------------------------------------
-// USB HID KEYBOARD REPORT
-//--------------------------------------------------------------------
-
-typedef struct {
-    uint8_t modifier;   // Modifier keys (Ctrl, Shift, Alt, etc.)
-    uint8_t reserved;   // Reserved (always 0)
-    uint8_t keycode[6]; // Up to 6 simultaneous keys
-} hid_keyboard_report_t;
+static uint32_t current_interval_ms = INTERVAL_MIN_MS;
 
 //--------------------------------------------------------------------
 // MAIN LOGIC
@@ -61,13 +62,25 @@ static void send_key_report(uint8_t modifier, uint8_t keycode) {
         return;  // USB not ready yet
     }
 
-    hid_keyboard_report_t report = {
-        .modifier = modifier,
-        .reserved = 0,
-        .keycode = {keycode, 0, 0, 0, 0, 0}
-    };
+    // Use TinyUSB's built-in keyboard report function
+    uint8_t keycodes[6] = {keycode, 0, 0, 0, 0, 0};
+    tud_hid_keyboard_report(0, modifier, keycodes);
+}
 
-    tud_hid_keyboard_report(0, report.modifier, report.keycode);
+// Simple pseudo-random number generator using timer
+static uint32_t simple_rand(void) {
+    static uint32_t seed = 0;
+    // Mix in current time for randomness
+    seed ^= time_us_32();
+    seed = seed * 1103515245 + 12345;  // Linear congruential generator
+    return seed;
+}
+
+// Generate random interval between INTERVAL_MIN_MS and INTERVAL_MAX_MS
+static uint32_t get_random_interval(void) {
+    uint32_t range = INTERVAL_MAX_MS - INTERVAL_MIN_MS;
+    uint32_t random_offset = simple_rand() % (range + 1);
+    return INTERVAL_MIN_MS + random_offset;
 }
 
 // Main state machine - called from main loop
@@ -98,12 +111,18 @@ static void update_state(void) {
             // Release all keys
             send_key_report(0, 0);
             current_state = STATE_IDLE;
-            next_action_time = make_timeout_time_ms(INTERVAL_MS);
+
+            // Generate new random interval for next key
+            current_interval_ms = get_random_interval();
+            next_action_time = make_timeout_time_ms(current_interval_ms);
 
             // Print status every 10 keys
             if (keys_sent % 10 == 0) {
-                printf("Sent %lu keys (PageUp every %dms)\n",
-                       (unsigned long)keys_sent, INTERVAL_MS);
+                printf("Sent %lu keys (PageUp every %lu-%lums, next in %lums)\n",
+                       (unsigned long)keys_sent,
+                       (unsigned long)INTERVAL_MIN_MS,
+                       (unsigned long)INTERVAL_MAX_MS,
+                       (unsigned long)current_interval_ms);
             }
             break;
     }
@@ -164,16 +183,17 @@ int main(void) {
     printf("=================================\n");
     printf("HID Scroller starting...\n");
     printf("Version: " GIT_COMMIT_HASH "\n");
-    printf("Interval: %d ms\n", INTERVAL_MS);
+    printf("Interval: %d-%d ms (random)\n", INTERVAL_MIN_MS, INTERVAL_MAX_MS);
     printf("Key: PageUp (0x%02X)\n", KEY_TO_SEND);
     printf("=================================\n");
     printf("\n");
 
-    // Initialize TinyUSB
-    tud_init(BOARD_TUD_RHPORT);
+    // Initialize TinyUSB (use default port 0 for RP2040/RP2350)
+    tud_init(0);
 
-    // Schedule first action
-    next_action_time = make_timeout_time_ms(INTERVAL_MS);
+    // Schedule first action with random interval
+    current_interval_ms = get_random_interval();
+    next_action_time = make_timeout_time_ms(current_interval_ms);
 
     printf("USB initialized, waiting for host...\n");
 

@@ -26,7 +26,7 @@ This is a **minimal USB HID keyboard device** for Raspberry Pi Pico that automat
 - Simple timer-based state machine
 
 **No external dependencies** beyond:
-- Pico SDK
+- Pico SDK (including hardware RNG support)
 - TinyUSB (included in Pico SDK)
 
 ## Configuration
@@ -34,9 +34,12 @@ This is a **minimal USB HID keyboard device** for Raspberry Pi Pico that automat
 Edit `src/hid_scroller.c` to change:
 
 ```c
-#define INTERVAL_MS 1000        // Milliseconds between keypresses
+#define INTERVAL_MIN_MS 5000    // Minimum milliseconds between keypresses
+#define INTERVAL_MAX_MS 7000    // Maximum milliseconds between keypresses
 #define KEY_TO_SEND HID_KEY_PAGEUP  // Key to send (see hid_keycodes.h)
 ```
+
+The device uses the RP2040's hardware random number generator to pick a random interval between `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS` for each keypress, making the timing more natural and less bot-like.
 
 **Available keys:**
 - `HID_KEY_PAGEUP` - Scroll up one page (default)
@@ -75,7 +78,7 @@ make -j$(nproc)
 2. Plug into USB port
 3. Navigate to infinite-scroll webpage
 4. Focus browser window
-5. Device automatically sends PageUp every second
+5. Device automatically sends PageUp every 5-7 seconds (random interval)
 
 **To stop:** Unplug the device or close the browser tab.
 
@@ -100,9 +103,11 @@ hid-scroller/
 
 ## Code Organization
 
-**src/hid_scroller.c** (~150 lines):
+**src/hid_scroller.c** (~200 lines):
 - `main()` - Initialize USB, enter main loop
-- `main_loop()` - Timer-based key sending
+- `get_random_interval()` - Generate random delay using hardware RNG
+- `update_state()` - Timer-based state machine for key sending
+- `send_key_report()` - Send HID keyboard report to host
 - `tud_hid_report_complete_cb()` - TinyUSB callback
 
 **src/usb_descriptors.c** (~100 lines):
@@ -113,6 +118,12 @@ hid-scroller/
 - TinyUSB configuration (keyboard only, no mouse/CDC)
 
 ## Extending
+
+**Want to change the random interval range?**
+```c
+#define INTERVAL_MIN_MS 3000    // Faster: 3-5 seconds
+#define INTERVAL_MAX_MS 5000
+```
 
 **Want to send multiple keys in sequence?**
 ```c
@@ -129,10 +140,11 @@ if (gpio_get(BUTTON_PIN)) {
 }
 ```
 
-**Want variable intervals (faster scrolling at start)?**
+**Want adaptive intervals (speed up over time)?**
 ```c
-uint32_t interval = 1000;  // Start slow
-if (keys_sent > 10) interval = 500;  // Speed up after 10 keys
+// In get_random_interval():
+uint32_t min = INTERVAL_MIN_MS - (keys_sent * 100);  // Decrease by 100ms per key
+if (min < 1000) min = 1000;  // Minimum 1 second
 ```
 
 ## Troubleshooting
@@ -143,8 +155,12 @@ if (keys_sent > 10) interval = 500;  // Speed up after 10 keys
 - Check USB connection is good
 
 **Sending too fast/slow:**
-- Adjust `INTERVAL_MS` in source
+- Adjust `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS` in source
 - Rebuild and reflash
+
+**Want fixed intervals instead of random:**
+- Set `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS` to the same value
+- Or modify `get_random_interval()` to return a constant
 
 **Wrong key being sent:**
 - Change `KEY_TO_SEND` in source

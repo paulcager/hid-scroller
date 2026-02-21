@@ -17,6 +17,16 @@ project(hid_scroller C CXX ASM)
 
 pico_sdk_init()
 
+# Configuration options (can be overridden at build time)
+set(INTERVAL_MIN_MS "5000" CACHE STRING "Minimum milliseconds between keypresses")
+set(INTERVAL_MAX_MS "7000" CACHE STRING "Maximum milliseconds between keypresses")
+set(KEY_TO_SEND "HID_KEY_PAGEUP" CACHE STRING "Key to send (e.g., HID_KEY_PAGEUP, HID_KEY_PAGEDOWN)")
+
+message(STATUS "Configuration:")
+message(STATUS "  INTERVAL_MIN_MS = ${INTERVAL_MIN_MS}")
+message(STATUS "  INTERVAL_MAX_MS = ${INTERVAL_MAX_MS}")
+message(STATUS "  KEY_TO_SEND = ${KEY_TO_SEND}")
+
 # Capture git commit hash for version identification
 execute_process(
     COMMAND git describe --always --dirty --abbrev=8
@@ -47,6 +57,9 @@ target_link_libraries(hid_scroller PUBLIC
 
 target_compile_definitions(hid_scroller PRIVATE
     GIT_COMMIT_HASH="${GIT_COMMIT_HASH}"
+    INTERVAL_MIN_MS=${INTERVAL_MIN_MS}
+    INTERVAL_MAX_MS=${INTERVAL_MAX_MS}
+    KEY_TO_SEND=${KEY_TO_SEND}
 )
 
 pico_add_extra_outputs(hid_scroller)
