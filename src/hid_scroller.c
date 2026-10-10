@@ -12,6 +12,7 @@
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/timer.h"
+#include "pico/rand.h"
 #include "tusb.h"
 #include "hid_keycodes.h"
 
@@ -32,6 +33,11 @@
 // Which key to send (see hid_keycodes.h for options)
 #ifndef KEY_TO_SEND
 #define KEY_TO_SEND HID_KEY_PAGEUP
+#endif
+
+// Human-readable key name for log output (set by CMake from KEY_TO_SEND)
+#ifndef KEY_TO_SEND_NAME
+#define KEY_TO_SEND_NAME "HID_KEY_PAGEUP"
 #endif
 
 // How long to hold key down before releasing (milliseconds)
@@ -56,30 +62,22 @@ static uint32_t current_interval_ms = INTERVAL_MIN_MS;
 // MAIN LOGIC
 //--------------------------------------------------------------------
 
-// Send a HID keyboard report to the host
-static void send_key_report(uint8_t modifier, uint8_t keycode) {
+// Send a HID keyboard report to the host.
+// Returns false if the report could not be queued (caller should retry).
+static bool send_key_report(uint8_t modifier, uint8_t keycode) {
     if (!tud_hid_ready()) {
-        return;  // USB not ready yet
+        return false;  // Endpoint busy or USB not ready
     }
 
     // Use TinyUSB's built-in keyboard report function
     uint8_t keycodes[6] = {keycode, 0, 0, 0, 0, 0};
-    tud_hid_keyboard_report(0, modifier, keycodes);
-}
-
-// Simple pseudo-random number generator using timer
-static uint32_t simple_rand(void) {
-    static uint32_t seed = 0;
-    // Mix in current time for randomness
-    seed ^= time_us_32();
-    seed = seed * 1103515245 + 12345;  // Linear congruential generator
-    return seed;
+    return tud_hid_keyboard_report(0, modifier, keycodes);
 }
 
 // Generate random interval between INTERVAL_MIN_MS and INTERVAL_MAX_MS
 static uint32_t get_random_interval(void) {
     uint32_t range = INTERVAL_MAX_MS - INTERVAL_MIN_MS;
-    uint32_t random_offset = simple_rand() % (range + 1);
+    uint32_t random_offset = get_rand_32() % (range + 1);
     return INTERVAL_MIN_MS + random_offset;
 }
 
@@ -100,16 +98,21 @@ static void update_state(void) {
             break;
 
         case STATE_SEND_KEY:
-            // Send the configured key
-            send_key_report(0, KEY_TO_SEND);
+            // Send the configured key (retry on next loop if busy)
+            if (!send_key_report(0, KEY_TO_SEND)) {
+                break;
+            }
             current_state = STATE_SEND_RELEASE;
             next_action_time = make_timeout_time_ms(KEY_HOLD_MS);
             keys_sent++;
             break;
 
         case STATE_SEND_RELEASE:
-            // Release all keys
-            send_key_report(0, 0);
+            // Release all keys - must not be dropped, or the host sees the
+            // key held down and auto-repeats it. Retry on next loop if busy.
+            if (!send_key_report(0, 0)) {
+                break;
+            }
             current_state = STATE_IDLE;
 
             // Generate new random interval for next key
@@ -118,7 +121,7 @@ static void update_state(void) {
 
             // Print status every 10 keys
             if (keys_sent % 10 == 0) {
-                printf("Sent %lu keys (PageUp every %lu-%lums, next in %lums)\n",
+                printf("Sent %lu keys (" KEY_TO_SEND_NAME " every %lu-%lums, next in %lums)\n",
                        (unsigned long)keys_sent,
                        (unsigned long)INTERVAL_MIN_MS,
                        (unsigned long)INTERVAL_MAX_MS,
@@ -184,7 +187,7 @@ int main(void) {
     printf("HID Scroller starting...\n");
     printf("Version: " GIT_COMMIT_HASH "\n");
     printf("Interval: %d-%d ms (random)\n", INTERVAL_MIN_MS, INTERVAL_MAX_MS);
-    printf("Key: PageUp (0x%02X)\n", KEY_TO_SEND);
+    printf("Key: " KEY_TO_SEND_NAME " (0x%02X)\n", KEY_TO_SEND);
     printf("=================================\n");
     printf("\n");
 

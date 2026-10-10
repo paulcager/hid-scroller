@@ -51,6 +51,7 @@ target_include_directories(hid_scroller PUBLIC
 
 target_link_libraries(hid_scroller PUBLIC
     pico_stdlib
+    pico_rand
     tinyusb_device
     tinyusb_board
 )
@@ -60,6 +61,7 @@ target_compile_definitions(hid_scroller PRIVATE
     INTERVAL_MIN_MS=${INTERVAL_MIN_MS}
     INTERVAL_MAX_MS=${INTERVAL_MAX_MS}
     KEY_TO_SEND=${KEY_TO_SEND}
+    KEY_TO_SEND_NAME="${KEY_TO_SEND}"
 )
 
 pico_add_extra_outputs(hid_scroller)

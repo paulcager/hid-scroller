@@ -10,7 +10,7 @@ This is a **minimal USB HID keyboard device** for Raspberry Pi Pico that automat
 - Plug-and-play USB HID keyboard (no drivers needed)
 - Configurable interval between keypresses
 - Configurable key to send (default: PageUp)
-- Single-file implementation (~150 lines)
+- Single-file implementation (~200 lines)
 - No flash storage, no encryption, no WiFi - just sends keys!
 
 **Hardware:**
@@ -26,20 +26,28 @@ This is a **minimal USB HID keyboard device** for Raspberry Pi Pico that automat
 - Simple timer-based state machine
 
 **No external dependencies** beyond:
-- Pico SDK (including hardware RNG support)
+- Pico SDK (including `pico_rand` for random intervals)
 - TinyUSB (included in Pico SDK)
 
 ## Configuration
 
-Edit `src/hid_scroller.c` to change:
+Settings are CMake cache variables, passed to the compiler as defines:
 
-```c
-#define INTERVAL_MIN_MS 5000    // Minimum milliseconds between keypresses
-#define INTERVAL_MAX_MS 7000    // Maximum milliseconds between keypresses
-#define KEY_TO_SEND HID_KEY_PAGEUP  // Key to send (see hid_keycodes.h)
+```bash
+cmake -DINTERVAL_MIN_MS=3000 -DINTERVAL_MAX_MS=5000 -DKEY_TO_SEND=HID_KEY_PAGEDOWN ..
 ```
 
-The device uses the RP2040's hardware random number generator to pick a random interval between `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS` for each keypress, making the timing more natural and less bot-like.
+Defaults (in `CMakeLists.txt`, with `#ifndef` fallbacks in `src/hid_scroller.c`):
+
+```c
+INTERVAL_MIN_MS  5000            // Minimum milliseconds between keypresses
+INTERVAL_MAX_MS  7000            // Maximum milliseconds between keypresses
+KEY_TO_SEND      HID_KEY_PAGEUP  // Key to send (see hid_keycodes.h)
+```
+
+Note: because these are CMake cache variables, editing the C defaults has no effect on a CMake build; change `CMakeLists.txt` or pass `-D` options. CMake also defines `KEY_TO_SEND_NAME` (the key's name as a string) for log output.
+
+The device uses the Pico SDK's `pico_rand` (`get_rand_32()`, seeded from hardware entropy sources) to pick a random interval between `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS` for each keypress, making the timing more natural and less bot-like.
 
 **Available keys:**
 - `HID_KEY_PAGEUP` - Scroll up one page (default)
@@ -70,7 +78,11 @@ make -j$(nproc)
 ### Flashing
 1. Hold BOOTSEL button on Pico while plugging in USB
 2. Copy `build/hid_scroller.uf2` to the RPI-RP2 drive
-3. Device reboots and starts sending keys immediately
+3. Device reboots and starts sending keys once the host has enumerated it
+
+Debug output (startup banner, status every 10 keys) goes to UART0 (GP0 TX / GP1 RX, 115200 baud), not USB serial.
+
+For Pico 2, build into a separate directory, e.g. `mkdir build.pico2 && cd build.pico2 && cmake -DPICO_BOARD=pico2 .. && make`. `build/` and `build.*/` are gitignored.
 
 ## Usage
 
@@ -105,13 +117,14 @@ hid-scroller/
 
 **src/hid_scroller.c** (~200 lines):
 - `main()` - Initialize USB, enter main loop
-- `get_random_interval()` - Generate random delay using hardware RNG
-- `update_state()` - Timer-based state machine for key sending
-- `send_key_report()` - Send HID keyboard report to host
+- `get_random_interval()` - Generate random delay using `get_rand_32()`
+- `update_state()` - Timer-based state machine for key sending; if a report can't be sent (endpoint busy) the state doesn't advance, so the press/release is retried on the next loop. This matters for the release: a dropped release would leave the key held and the host would auto-repeat it.
+- `send_key_report()` - Send HID keyboard report to host; returns `false` if not sent
 - `tud_hid_report_complete_cb()` - TinyUSB callback
 
 **src/usb_descriptors.c** (~100 lines):
 - Minimal USB HID keyboard descriptor
+- VID `0x2E8A` (Raspberry Pi), PID `0xB90B` (randomly chosen, unregistered; apply at github.com/raspberrypi/usb-pid for an official PID if publishing)
 - Device/product strings
 
 **include/tusb_config.h** (~30 lines):
@@ -155,7 +168,7 @@ if (min < 1000) min = 1000;  // Minimum 1 second
 - Check USB connection is good
 
 **Sending too fast/slow:**
-- Adjust `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS` in source
+- Re-run cmake with `-DINTERVAL_MIN_MS=... -DINTERVAL_MAX_MS=...` (or edit the defaults in `CMakeLists.txt`)
 - Rebuild and reflash
 
 **Want fixed intervals instead of random:**
@@ -163,7 +176,7 @@ if (min < 1000) min = 1000;  // Minimum 1 second
 - Or modify `get_random_interval()` to return a constant
 
 **Wrong key being sent:**
-- Change `KEY_TO_SEND` in source
+- Re-run cmake with `-DKEY_TO_SEND=HID_KEY_...` (check the startup banner on UART to confirm)
 - Rebuild and reflash
 
 ## Differences from hid-proxy
@@ -173,7 +186,7 @@ This project is intentionally **minimal** compared to hid-proxy:
 | Feature | hid-scroller | hid-proxy |
 |---------|--------------|-----------|
 | Purpose | Send keys automatically | Intercept/modify keystrokes |
-| Code size | ~150 lines | ~3000+ lines |
+| Code size | ~200 lines | ~3000+ lines |
 | Complexity | Single file | 20+ files |
 | USB mode | Device only | Device + Host (PIO-USB) |
 | Cores used | 1 (Core 0) | 2 (Core 0 + 1) |

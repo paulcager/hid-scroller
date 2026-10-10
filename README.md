@@ -1,6 +1,6 @@
 # HID Scroller
 
-Automatic keyboard scroller for Raspberry Pi Pico. Sends PageUp (or any configured key) at regular intervals.
+Automatic keyboard scroller for Raspberry Pi Pico. Sends PageUp (or any configured key) at random intervals (default: every 5-7 seconds).
 
 ## Use Case
 
@@ -9,9 +9,9 @@ Scrolling backwards through infinite-scroll web pages (chat logs, social media f
 ## Features
 
 - ✅ Plug-and-play USB HID keyboard (no drivers needed)
-- ✅ Configurable interval between keypresses
+- ✅ Configurable random interval between keypresses (less bot-like than a fixed rate)
 - ✅ Configurable key to send (PageUp, PageDown, arrows, etc.)
-- ✅ Single-file implementation (~150 lines)
+- ✅ Single-file implementation (~200 lines)
 - ✅ Minimal dependencies (just Pico SDK)
 
 ## Quick Start
@@ -30,12 +30,23 @@ Scrolling backwards through infinite-scroll web pages (chat logs, social media f
 
 ## Configuration
 
-Edit `src/hid_scroller.c` and change these values:
+Settings are CMake options. Each keypress waits a random time between `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS`.
 
-```c
-#define INTERVAL_MS 1000        // Milliseconds between keypresses (default: 1 second)
-#define KEY_TO_SEND HID_KEY_PAGEUP  // Key to send (default: PageUp)
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `INTERVAL_MIN_MS` | `5000` | Minimum milliseconds between keypresses |
+| `INTERVAL_MAX_MS` | `7000` | Maximum milliseconds between keypresses |
+| `KEY_TO_SEND` | `HID_KEY_PAGEUP` | Key to send |
+
+Pass them when configuring a manual build:
+
+```bash
+cmake -DINTERVAL_MIN_MS=3000 -DINTERVAL_MAX_MS=5000 -DKEY_TO_SEND=HID_KEY_PAGEDOWN ..
 ```
+
+or change the defaults in `CMakeLists.txt` (needed for `./build.sh`, which doesn't pass options through). Editing the `#define`s in `src/hid_scroller.c` has no effect, because CMake always supplies these values.
+
+For a fixed interval, set `INTERVAL_MIN_MS` and `INTERVAL_MAX_MS` to the same value.
 
 ### Available Keys
 
@@ -65,21 +76,36 @@ cmake ..
 make -j$(nproc)
 ```
 
+For Pico 2 (RP2350), use a separate build directory:
+
+```bash
+mkdir build.pico2 && cd build.pico2
+cmake -DPICO_BOARD=pico2 ..
+make -j$(nproc)
+```
+
+## Debug Output
+
+The startup banner (version, interval, key) and a status line every 10 keys are printed on UART0: GP0 (TX) / GP1 (RX), 115200 baud. Nothing is sent over USB serial.
+
 ## Hardware
 
 - **Raspberry Pi Pico** (RP2040) - recommended
 - **Raspberry Pi Pico W** - also works (WiFi unused)
 - Any RP2040 board should work
+- **Raspberry Pi Pico 2** (RP2350) - builds, but untested on hardware
+
+The device identifies as USB VID `0x2E8A` / PID `0xB90B`. The PID is unregistered; if you distribute this, request your own from Raspberry Pi (https://github.com/raspberrypi/usb-pid).
 
 ## Tips
 
-**Too fast?** Increase `INTERVAL_MS` (e.g., 2000 for 2 seconds)
+**Too fast?** Increase `INTERVAL_MIN_MS` / `INTERVAL_MAX_MS` (e.g., 8000 / 10000)
 
-**Too slow?** Decrease `INTERVAL_MS` (e.g., 500 for 0.5 seconds)
+**Too slow?** Decrease them (e.g., 2000 / 3000)
 
 **Want to pause?** Just unplug the device or focus a different window
 
-**Need different key?** Change `KEY_TO_SEND` (see `hid_keycodes.h`)
+**Need different key?** Set `KEY_TO_SEND` (see `hid_keycodes.h`); the UART startup banner shows which key was built in
 
 ## License
 
